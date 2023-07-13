@@ -1,0 +1,114 @@
+// A simple strategy using three Moving Averages and Williams Fractals for scalping.
+// The strategy has been explained in this video: https://youtu.be/bKPs2aOsvsk
+// It should be noted that the reverse of the strategy works better! :D
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             USDCAD
+//      Timeframe:          1 MIN
+//      Range:              2023-07-09 21:00 — 2023-07-13 13:14
+//      Percent Profitable: 70.8%
+//      Total Trades:       127
+//      Profit Factor:      1.326
+
+// Backtesting result:
+//      Symbol:             EURUSD
+//      Timeframe:          30 MIN
+//      Range:              2023-01-02 00:00 — 2023-07-13 13:00
+//      Percent Profitable: 76.7%
+//      Total Trades:       172
+//      Profit Factor:      1.399
+
+
+//@version=5
+strategy("3MA and Fractals Strategy", "3MAF", overlay=true)
+
+len1 = input.int(20, "EMA1 Len", 1)
+len2 = input.int(50, "EMA2 Len", 1)
+len3 = input.int(100, "EMA3 Len", 1)
+n = input.int(2, "Fractals Len", 2)
+tpCoef = input.float(1, "TP Coef")
+reverse = input.bool(false, "Reverse Signal")
+dispInd = input.bool(false, "Display Indicators")
+
+ma1 = ta.ema(close, len1)
+ma2 = ta.ema(close, len2)
+ma3 = ta.ema(close, len3)
+
+plot(dispInd ? ma1 : na, title="EMA1", color=color.red)
+plot(dispInd ? ma2 : na, title="EMA2", color=color.green)
+plot(dispInd ? ma3 : na, title="EMA3", color=color.blue)
+
+
+// UpFractal
+bool upflagDownFrontier = true
+bool upflagUpFrontier0 = true
+bool upflagUpFrontier1 = true
+bool upflagUpFrontier2 = true
+bool upflagUpFrontier3 = true
+bool upflagUpFrontier4 = true
+
+for i = 1 to n
+    upflagDownFrontier := upflagDownFrontier and (high[n-i] < high[n])
+    upflagUpFrontier0 := upflagUpFrontier0 and (high[n+i] < high[n])
+    upflagUpFrontier1 := upflagUpFrontier1 and (high[n+1] <= high[n] and high[n+i + 1] < high[n])
+    upflagUpFrontier2 := upflagUpFrontier2 and (high[n+1] <= high[n] and high[n+2] <= high[n] and high[n+i + 2] < high[n])
+    upflagUpFrontier3 := upflagUpFrontier3 and (high[n+1] <= high[n] and high[n+2] <= high[n] and high[n+3] <= high[n] and high[n+i + 3] < high[n])
+    upflagUpFrontier4 := upflagUpFrontier4 and (high[n+1] <= high[n] and high[n+2] <= high[n] and high[n+3] <= high[n] and high[n+4] <= high[n] and high[n+i + 4] < high[n])
+flagUpFrontier = upflagUpFrontier0 or upflagUpFrontier1 or upflagUpFrontier2 or upflagUpFrontier3 or upflagUpFrontier4
+
+upFractal = (upflagDownFrontier and flagUpFrontier)
+
+// downFractal
+bool downflagDownFrontier = true
+bool downflagUpFrontier0 = true
+bool downflagUpFrontier1 = true
+bool downflagUpFrontier2 = true
+bool downflagUpFrontier3 = true
+bool downflagUpFrontier4 = true
+
+for i = 1 to n
+    downflagDownFrontier := downflagDownFrontier and (low[n-i] > low[n])
+    downflagUpFrontier0 := downflagUpFrontier0 and (low[n+i] > low[n])
+    downflagUpFrontier1 := downflagUpFrontier1 and (low[n+1] >= low[n] and low[n+i + 1] > low[n])
+    downflagUpFrontier2 := downflagUpFrontier2 and (low[n+1] >= low[n] and low[n+2] >= low[n] and low[n+i + 2] > low[n])
+    downflagUpFrontier3 := downflagUpFrontier3 and (low[n+1] >= low[n] and low[n+2] >= low[n] and low[n+3] >= low[n] and low[n+i + 3] > low[n])
+    downflagUpFrontier4 := downflagUpFrontier4 and (low[n+1] >= low[n] and low[n+2] >= low[n] and low[n+3] >= low[n] and low[n+4] >= low[n] and low[n+i + 4] > low[n])
+flagDownFrontier = downflagUpFrontier0 or downflagUpFrontier1 or downflagUpFrontier2 or downflagUpFrontier3 or downflagUpFrontier4
+
+downFractal = (downflagDownFrontier and flagDownFrontier)
+
+plotshape(dispInd ? downFractal : na, style=shape.triangledown, location=location.belowbar, offset=-n, color=#F44336, size=size.small)
+plotshape(dispInd ? upFractal : na, style=shape.triangleup,   location=location.abovebar, offset=-n, color=#009688, size=size.small)
+
+
+longSignal = ma1 > ma2 and ma2 > ma3 and low > ma3 and low < ma1 and downFractal
+shortSignal = ma3 > ma2 and ma2 > ma1 and high < ma3 and high > ma1 and upFractal
+
+longSL = low > ma2 ? ma2 : ma3
+shortSL = high < ma2 ? ma2 : ma3
+
+if longSignal
+    if not reverse
+        strategy.entry("long", strategy.long)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        longTP = inn + tpCoef * (inn - longSL)
+        strategy.exit("exit", "long", stop=longSL, limit=longTP, comment_loss="SL long", comment_profit="TP long")
+    else
+        strategy.entry("short", strategy.short)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        longTP = inn + tpCoef * (inn - longSL)
+        strategy.exit("exit", "short", stop=longTP, limit=longSL, comment_loss="SL short", comment_profit="TP short")   
+
+if shortSignal
+    if not reverse
+        strategy.entry("short", strategy.short)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        shortTp = inn - tpCoef * (shortSL - inn)
+        strategy.exit("exit", "short", stop=shortSL, limit=shortTp, comment_loss="SL short", comment_profit="TP short")
+    else
+        strategy.entry("long", strategy.long)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        shortTp = inn - tpCoef * (shortSL - inn)
+        strategy.exit("exit", "long", stop=shortTp, limit=shortSL, comment_loss="SL long", comment_profit="TP long")

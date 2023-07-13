@@ -1,0 +1,47 @@
+// This is a simple strategy based on a candlestick pattern for scalping.
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             EURJPY
+//      Timeframe:          1 MIN
+//      Range:              2023-07-02 — 2023-07-12
+//      Percent Profitable: 78.2%
+//      Total Trades:       344
+//      Profit Factor:      1.482
+
+
+//@version=5
+strategy("Candlestick Pattern Strategy 1", "CP1", overlay=true)
+
+reverse = input.bool(true, "Reverse Signal")
+
+longSignal = close > open and close[1] > open[1] and open[1] < open and close > close[1] and low < low[1] and low < open[1]
+longStop = low
+
+shortSignal = close < open and close[1] < open[1] and open[1] > open and close < close[1] and high > high[1] and high > open[1]
+shortStop = high
+
+if (longSignal)
+    if (not reverse)
+        strategy.entry("long", strategy.long)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        longTp = inn + (inn - longStop)
+        strategy.exit("exit", "long", stop=longStop, limit=longTp, comment_loss="Stop long", comment_profit="TP long")
+    else
+        strategy.entry("short", strategy.short)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        longTp = inn + (inn - longStop)
+        strategy.exit("exit", "short", stop=longTp, limit=longStop, comment_loss="Stop short", comment_profit="TP short")   
+
+if (shortSignal)
+    if (not reverse)
+        strategy.entry("short", strategy.short)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        shortTp = inn - (shortStop - inn)
+        strategy.exit("exit", "short", stop=shortStop, limit=shortTp, comment_loss="Stop short", comment_profit="TP short")
+    else
+        strategy.entry("long", strategy.long)
+        inn = strategy.opentrades.entry_price(strategy.opentrades - 1)
+        shortTp = inn - (shortStop - inn)
+        strategy.exit("exit", "long", stop=shortTp, limit=shortStop, comment_loss="Stop long", comment_profit="TP long")  

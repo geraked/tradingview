@@ -1,0 +1,64 @@
+// This is the implementation of the strategy explained in this video: https://youtu.be/2U5VTWBBK8U
+// It uses the Chandelier Exit and ZLSMA indicators. It is based on the Heikin Ashi candles.
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             EURJPY
+//      Timeframe:          1 MIN
+//      Range:              2023-07-02 21:05 — 2023-07-12 14:38
+//      Percent Profitable: 70.24%
+//      Total Trades:       457
+//      Profit Factor:      5.392
+
+
+//@version=5
+strategy("Chandelier Exit & ZLSMA Strategy", "CEZLSMA", overlay=true)
+
+showIndicators = input.bool(title="Show Chandelier Exit and ZLSMA Indicators", defval=false)
+length = input.int(title="Chandelier Exit ATR Period", defval=1)
+mult = input.int(title="Chandelier Exit ATR Multiplier", defval=2)
+length2 = input.int(title="ZLSMA Period", defval=50)
+
+atr = mult * ta.atr(length)
+
+longStop = ta.highest(close, length) - atr
+longStopPrev = nz(longStop[1], longStop)
+longStop := close[1] > longStopPrev ? math.max(longStop, longStopPrev) : longStop
+
+shortStop = ta.lowest(close, length) + atr
+shortStopPrev = nz(shortStop[1], shortStop)
+shortStop := close[1] < shortStopPrev ? math.min(shortStop, shortStopPrev) : shortStop
+
+var int dir = 1
+dir := close > shortStopPrev ? 1 : close < longStopPrev ? -1 : dir
+
+buySignal = dir == 1 and dir[1] == -1
+sellSignal = dir == -1 and dir[1] == 1
+
+plotshape(showIndicators and buySignal ? longStop : na, title="Buy Label", text="Buy", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.blue, textcolor=color.white)
+plotshape(showIndicators and sellSignal ? shortStop : na, title="Sell Label", text="Sell", location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.red, textcolor=color.white)
+
+lsma = ta.linreg(close, length2, 0)
+lsma2 = ta.linreg(lsma, length2, 0)
+eq = lsma - lsma2
+zlsma = lsma + eq
+
+plot(showIndicators ? zlsma : na, color=color.white, linewidth=3)
+
+buySignal := buySignal and close > zlsma
+sellSignal := sellSignal and close < zlsma
+
+if (ta.crossunder(close, zlsma))
+    strategy.close(id="long", comment="Close longs")
+
+if (ta.crossover(close, zlsma))
+    strategy.close(id="short", comment="Close shorts")
+
+if (buySignal)
+    strategy.entry("long", strategy.long)
+    strategy.exit("exit", "long", stop=longStop, comment_loss="Stop long")
+
+if (sellSignal)
+    strategy.entry("short", strategy.short)
+    strategy.exit("exit", "short", stop=shortStop, comment_loss="Stop short")
