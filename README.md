@@ -9,6 +9,8 @@ Implementation of Trading Strategies in Pine Script for Backtesting in TradingVi
 | [CP1](strategies/CP1.pine) | 78.2% | 1.482 | 344 | EURJPY | 1 MIN | 2023-07-02 — 2023-07-12 |  |
 | [BBRSI](strategies/BBRSI.pine) | 75.0% | 2.120 | 88 | EURUSD | 5 MIN | 2023-06-18 — 2023-07-14 | [:arrow_forward:](https://youtu.be/pCmJ8wsAS_w) |
 
+Additionally, there are strategies available for utilization within MetaTrader 5. If this piques your interest, you can explore them in this [repository](https://github.com/geraked/metatrader5).
+
 ## Author
 
 **Rabist** - view on [LinkedIn](https://www.linkedin.com/in/rabist)
