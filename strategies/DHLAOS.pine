@@ -1,0 +1,135 @@
+// A strategy using Daily High/Low and Andean Oscillator indicators for scalping
+// The strategy has been explained in this video: https://youtu.be/IZVSb1kjduQ
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             AUDUSD
+//      Timeframe:          5 MIN
+//      Range:              2023-08-06 21:00 — 2023-09-03 21:00
+//      Percent Profitable: 69.5%
+//      Total Trades:       23
+//      Profit Factor:      3.098
+
+
+//@version=5
+strategy("Daily High/Low and Andean Oscillator Strategy", "DHLAOS", pyramiding=10, overlay=true)
+
+tpCoef = input.float(1.5, "TP Coef", group="Strategy")
+swingLen = input.int(5, "Swing Length", group="Strategy")
+reverse = input.bool(false, "Reverse Signal", group="Strategy")
+
+length = input.int(50)
+sig_length = input.int(9,'Signal Length')
+
+var alpha = 2/(length+1)
+var up1 = 0.,var up2 = 0.
+var dn1 = 0.,var dn2 = 0.
+
+C = close
+O = open
+up1 := nz(math.max(C, O, up1[1] - (up1[1] - C) * alpha), C)
+up2 := nz(math.max(C * C, O * O, up2[1] - (up2[1] - C * C) * alpha), C * C)
+dn1 := nz(math.min(C, O, dn1[1] + (C - dn1[1]) * alpha), C)
+dn2 := nz(math.min(C * C, O * O, dn2[1] + (C * C - dn2[1]) * alpha), C * C)
+
+bull = math.sqrt(dn2 - dn1 * dn1)
+bear = math.sqrt(up2 - up1 * up1)
+signal = ta.ema(math.max(bull, bear), sig_length)
+
+indexHighTF = barstate.isrealtime ? 1 : 0
+indexCurrTF = barstate.isrealtime ? 0 : 1
+pricehigh = request.security(syminfo.tickerid, "1D", high[indexHighTF])[indexCurrTF]
+pricelow = request.security(syminfo.tickerid, "1D", low[indexHighTF])[indexCurrTF]
+
+plot(pricehigh, "Previous Daily High", color.white, 2, plot.style_linebr)
+plot(pricelow, "Previous Daily Low", color.white, 2, plot.style_linebr)
+
+long = bull[1] <= signal[1] and bull > signal
+short = bear[1] <= signal[1] and bear > signal
+
+var n = 300
+var k = 50
+var li = 0
+var si = 0
+
+if long
+    for i=2 to n
+        if bull[i+1] >= bear[i+1] and bull[i] < bear[i]
+            long := false
+            break
+        else if bull[i+1] >= signal[i+1] and bull[i] < signal[i]
+            long := false
+            break
+        else if bull[i+1] <= signal[i+1] and bull[i] > signal[i]
+            long := false
+            break            
+        else if bull[i+1] <= bear[i+1] and bull[i] > bear[i]
+            li := i
+            break
+
+if short
+    for i=2 to n
+        if bull[i+1] <= bear[i+1] and bull[i] > bear[i]
+            short := false
+            break
+        else if bear[i+1] >= signal[i+1] and bear[i] < signal[i]
+            short := false
+            break
+        else if bear[i+1] <= signal[i+1] and bear[i] > signal[i]
+            short := false
+            break                        
+        else if bull[i+1] >= bear[i+1] and bull[i] < bear[i]
+            si := i
+            break
+
+lc = false
+sc = false
+
+if long
+    for i=li to li + k
+        if high[i] < pricelow[i] and bull[i] < bear[i]
+            lc := true
+            break
+
+if short
+    for i=si to si + k
+        if low[i] > pricehigh[i] and bull[i] > bear[i]
+            sc := true
+            break
+
+long := long and lc
+short := short and sc
+
+longSl = ta.lowest(low, swingLen)
+shortSl = ta.highest(high, swingLen)
+var cnt = 1
+
+plotshape(long, style=shape.triangleup, color=color.green, location=location.belowbar, size=size.small)
+plotshape(short, style=shape.triangledown, color=color.red, location=location.abovebar, size=size.small)
+
+if long
+    inn = close
+    longTp = inn + tpCoef * (inn - longSl)    
+    if not reverse
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=longSl, limit=longTp)
+    else
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=longTp, limit=longSl)
+    cnt += 1
+
+if short
+    inn = close
+    shortTp = inn - tpCoef * (shortSl - inn)
+    if not reverse
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=shortSl, limit=shortTp)
+    else
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=shortTp, limit=shortSl)
+    cnt += 1
