@@ -10,6 +10,7 @@ Implementation of Trading Strategies in Pine Script for Backtesting in TradingVi
 | [BBRSI](strategies/BBRSI.pine) | 75.0% | 2.120 | 88 | EURUSD | 5 MIN | 2023-06-18 — 2023-07-14 | [:arrow_forward:](https://youtu.be/pCmJ8wsAS_w) |
 | [ABSAR](strategies/ABSAR.pine) | 64.5% | 2.004 | 31 | EURUSD | 2 HOUR | 2022-01-02 — 2023-09-01 | [:arrow_forward:](https://youtu.be/4H9bmo8IjY0) |
 | [DHLAOS](strategies/DHLAOS.pine) | 69.5% | 3.098 | 23 | AUDUSD | 5 MIN | 2023-08-06 — 2023-09-03 | [:arrow_forward:](https://youtu.be/IZVSb1kjduQ) |
+| [MLCEL_MACD](strategies/MLCEL_MACD.pine) | 51.0% | 2.101 | 47 | EURUSD | 4 HOUR | 2022-06-16 — 2023-09-21 | [:arrow_forward:](https://youtu.be/f2f-Tmf2Eec) |
 
 Additionally, there are strategies available for utilization within MetaTrader 5. If this piques your interest, you can explore them in this [repository](https://github.com/geraked/metatrader5).
 

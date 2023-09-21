@@ -1,0 +1,352 @@
+// A strategy using "Machine Learning : Cosine Similarity & Euclidean + Lorentzian Distance" and MACD indicators
+// The strategy has been explained in this video: https://youtu.be/f2f-Tmf2Eec
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             EURUSD
+//      Timeframe:          4 HOUR
+//      Range:              2022-06-16 — 2023-09-21
+//      Percent Profitable: 51.0%
+//      Total Trades:       47
+//      Profit Factor:      2.101
+
+//@version=5
+strategy("MLCEL and MACD Strategy", "MLCEL_MACD", pyramiding=10, default_qty_type=strategy.percent_of_equity, overlay=true)
+
+import chhagansinghmeena/BankNifty_CSM/16 as CSM
+
+tpCoef = input.float(3, "TP Coef", group="Strategy")
+slLookBack = input.int(7, "SL Look Back", group="Strategy")
+reverse = input.bool(false, "Reverse Signal", group="Strategy")
+
+rationalQuadratic(_src, _lookback, _relativeWeight, startAtBar) =>
+    _currentWeight = 0.0
+    _cumulativeWeight = 0.0
+    _size = array.size(array.from(_src))
+    for i = 0 to _size + startAtBar
+        y = _src[i]
+        w = math.pow(1 + (math.pow(i, 2) / ((math.pow(_lookback, 2) * 2 * _relativeWeight))), -_relativeWeight)
+        _currentWeight += y * w
+        _cumulativeWeight += w
+    rationalQuad = _currentWeight / _cumulativeWeight
+    rationalQuad
+
+get_Linear_interpolation(series float src, float oldMax , simple int lookback=100) =>
+    minVal = ta.lowest(src,lookback)
+    (src - minVal) / (oldMax - minVal) 
+
+n_rsi(series float src, simple int n1, simple int n2) =>
+    get_Linear_interpolation(ta.ema(ta.rsi(src, n1), n2),100)
+
+calc_kst(series float src) =>
+    lengthROC1 = 10, lengthROC2 = 15, lengthROC3 = 20, lengthROC4 = 30
+    roc1 = ta.change(src, lengthROC1), roc2 = ta.change(src, lengthROC2), roc3 = ta.change(src, lengthROC3), roc4 = ta.change(src, lengthROC4)
+    smoothed1 = ta.sma(roc1, 3), smoothed2 = ta.sma(roc2, 3), smoothed3 = ta.sma(roc3, 3), smoothed4 = ta.sma(roc4, 3)
+    kstLine = smoothed1 + 2 * smoothed2 + 3 * smoothed3 + 4 * smoothed4
+    rsiKST = ta.rsi(kstLine, 14)
+    rsiKST
+
+get_linear_transformation(series float src = close, float min, float max, int lookback = 200) => 
+    _historicMin = ta.highest(nz(src), lookback) 
+    _historicMax = ta.lowest(nz(src), lookback) 
+    linearValue = min + (max - min) * (src - _historicMin) / math.max(_historicMax - _historicMin, 10e-10)
+    linearValue
+
+sigmoid(series float src, int lookback = 20, float relativeWeight = 8, int startAtBar = 25) =>
+    _currentWeight = 0.0
+    _cumulativeWeight = 0.0
+    _size = ta.barssince(startAtBar) + 1
+    for i = _size to math.max(startAtBar, lookback + startAtBar) - 1
+        y = src[i]
+        w = math.pow(1 + (math.pow(i - startAtBar, 2) / (math.pow(lookback, 2) * 2 * relativeWeight)), -relativeWeight)
+        _currentWeight += y * w
+        _cumulativeWeight += w
+    sigmoidValue = _currentWeight / _cumulativeWeight
+    sigmoidValue
+
+macd(series float src = close) =>
+    [macdLine, signalLine, _] = ta.macd(src, 12, 26, 9)
+    ma = get_linear_transformation(macdLine, 14, 1)
+    sa = get_linear_transformation(signalLine, 14, 1)
+    macd_val = math.avg(ma, sa)
+    macd_val
+
+historyLookBack = input.int(title='History Lookback', defval=2000, group='General Settings', tooltip='Number of historical periods to consider for analysis.')
+nearest_Probable_Distance = input.int(title='Nearest Probable Distance', defval=8, group='General Settings', tooltip='The closest distance to consider when determining probable values.')
+dash_loc = input.session("Top Right", "Stats Location", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left", "Middle Right", "Bottom Center"], group='General Settings', inline="Stats Location", tooltip='The position of the statistics display on the chart.')
+text_size = input.session('Small', "Stats Size", options=["Tiny", "Small", "Normal", "Large"], group='General Settings', inline="Stats Location", tooltip='The size of the text used for the statistics display.')
+trenSelection = input.string(title='Moving Average Selection', options=['CPMA', 'FRMA', 'RationalQuad'], defval='RationalQuad', group='Moving Averages', tooltip='The type of moving average to use for trend analysis.')
+cpmaLength = input.int(title="CPMA Length", defval=9, group='Moving Averages', tooltip='The length of the Centered Price Moving Average (CPMA) used for trend analysis.')
+frmaLength = input.int(title="FRMA Length", defval=14, group='Moving Averages', tooltip='The length of the Fractal Adaptive Moving Average (FRMA) used for trend analysis.')
+enableFilter = input.bool(title="Enable Trend Filter", defval=true, group='Filter', tooltip='Enable or disable the trend filter for signal processing, which provides greater accuracy.')
+isRational = input.bool(title="Use Rational smoothing", defval=true, group='Filter', tooltip='Enable or disable the rational smoothing function for the selected moving average, used as a trend filter.')
+isRationalSigma = input.bool(title="Use Sigmoid smoothing ", defval=true, group='Filter', tooltip='Enable or disable the sigmoid smoothing function, which works in conjunction with the rational smoothing function.')
+methodSelection = input.string(title='Distance Calculation', options=['Lorentzian', 'Euclidean', 'Cosine similarity'], defval='Cosine similarity', group='Machine Learning : Methods', tooltip='The method used for calculating the distance similarity or dissimilarity when processing signals using machine learning techniques.')
+
+var table_position = dash_loc == 'Top Left' ? position.top_left :
+  dash_loc == 'Bottom Left' ? position.bottom_left :
+  dash_loc == 'Middle Right' ? position.middle_right :
+  dash_loc == 'Bottom Center' ? position.bottom_center :
+  dash_loc == 'Top Right' ? position.top_right : position.bottom_right
+  
+var table_text_size = text_size == 'Tiny' ? size.tiny :
+  text_size == 'Small' ? size.small :
+  text_size == 'Normal' ? size.normal : size.large
+
+CPMA = CSM.CSM_CPMA(length = cpmaLength)
+FRMA = CSM.frama_Calculation(close,length = frmaLength)
+
+type FeatureArrays
+    array<float> f1
+    array<float> f2
+    array<float> f3
+    array<float> f4
+    array<float> f5
+    array<float> f6
+
+type FeatureSeries
+    float f1
+    float f2
+    float f3
+    float f4
+    float f5
+    float f6
+
+series_from(feature_string, _close, _high, _low, _hlc3, f_paramA, f_paramB) =>
+    switch feature_string
+        "RSI" => n_rsi(_close, f_paramA, f_paramB)    
+        "KST" => get_Linear_interpolation(calc_kst(src = _close),100)
+        "CPMA"=> get_linear_transformation(CPMA,14,1)
+        "VWAP"=> get_linear_transformation(ta.vwap(_close),14,1)
+        "FRAMA"=> get_linear_transformation(FRMA,14,1) 
+        "MACD"=> macd(_close)     
+        
+featureSeries = 
+ FeatureSeries.new(
+   series_from("CPMA", close, high, low, hlc3, 0, 0), // f1
+   series_from("RSI", close, high, low, hlc3, 14, 1), // f2
+   series_from("VWAP", close, high, low, hlc3, 0, 0), // f3
+   series_from("KST", close, high, low, hlc3, 0, 0),  // f4
+   series_from("FRAMA", close, high, low, hlc3, 0, 0), // f5
+   series_from("MACD", close, high, low, hlc3, 0, 0)  // f6
+ )
+
+var f1Array = array.new_float()
+var f2Array = array.new_float()
+var f3Array = array.new_float()
+var f4Array = array.new_float()
+var f5Array = array.new_float()
+var f6Array = array.new_float()
+
+array.push(f1Array, featureSeries.f1)
+array.push(f2Array, featureSeries.f2)
+array.push(f3Array, featureSeries.f3)
+array.push(f4Array, featureSeries.f4)
+array.push(f5Array, featureSeries.f5)
+array.push(f6Array, featureSeries.f6)
+
+featureArrays = 
+ FeatureArrays.new(
+  f1Array, // f1
+  f2Array, // f2
+  f3Array, // f3
+  f4Array, // f4
+  f5Array,  // f5
+  f6Array  // f6
+ )
+
+rqkValue = isRationalSigma ? sigmoid(close) : rationalQuadratic(close, 8, 0.5, 25)
+
+get_euclidean_distance(int i, FeatureSeries featureSeries, FeatureArrays featureArrays) =>
+    distance = 0.0
+    distance += math.pow(featureSeries.f1 - array.get(featureArrays.f1, i), 2)
+    distance += math.pow(featureSeries.f2 - array.get(featureArrays.f2, i), 2)
+    distance += math.pow(featureSeries.f4 - array.get(featureArrays.f4, i), 2)
+    distance += math.pow(featureSeries.f5 - array.get(featureArrays.f5, i), 2)
+    distance += math.pow(featureSeries.f6 - array.get(featureArrays.f6, i), 2)
+    if str.tonumber(timeframe.period) <= 20
+        distance += math.pow(featureSeries.f3 - array.get(featureArrays.f3, i), 2)
+    math.sqrt(distance)
+
+get_lorentzian_distance(int i, FeatureSeries featureSeries, FeatureArrays featureArrays) =>
+    distance = 0.0
+    distance += math.log(1+math.abs(featureSeries.f1 - array.get(featureArrays.f1, i)))
+    distance += math.log(1+math.abs(featureSeries.f2 - array.get(featureArrays.f2, i)))
+    distance += math.log(1+math.abs(featureSeries.f4 - array.get(featureArrays.f4, i)))
+    distance += math.log(1+math.abs(featureSeries.f5 - array.get(featureArrays.f5, i)))
+    distance += math.log(1+math.abs(featureSeries.f6 - array.get(featureArrays.f6, i)))
+    if str.tonumber(timeframe.period) <= 20
+        distance += math.log(1+math.abs(featureSeries.f3 - array.get(featureArrays.f3, i)))
+    math.sqrt(distance)
+
+get_cosine_similarity(i, featureSeries, featureArrays) =>
+    dotProduct = 0.0
+    magnitudeSeries = 0.0
+    magnitudeArray = 0.0
+    dotProduct += featureSeries.f1 * array.get(featureArrays.f1, i)
+    dotProduct += featureSeries.f2 * array.get(featureArrays.f2, i)
+    dotProduct += featureSeries.f4 * array.get(featureArrays.f4, i)
+    dotProduct += featureSeries.f5 * array.get(featureArrays.f5, i)
+    dotProduct += featureSeries.f6 * array.get(featureArrays.f6, i)
+    magnitudeSeries +=  math.pow(featureSeries.f1, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f2, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f4, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f5, 2)
+    magnitudeSeries +=  math.pow(featureSeries.f6, 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f1, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f2, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f4, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f5, i), 2)
+    magnitudeArray += math.pow(array.get(featureArrays.f6, i), 2)
+    if str.tonumber(timeframe.period) <= 20
+        dotProduct += featureSeries.f3 * array.get(featureArrays.f3, i)
+        magnitudeSeries +=  math.pow(featureSeries.f3, 2)
+        magnitudeArray += math.pow(array.get(featureArrays.f3, i), 2)
+    magnitudeSeries := math.sqrt(magnitudeSeries)
+    magnitudeArray := math.sqrt(magnitudeArray)
+    if magnitudeSeries == 0.0 or magnitudeArray == 0.0
+        0.0
+    else
+        dotProduct / (magnitudeSeries * magnitudeArray)
+
+maxBarsBackIndex = last_bar_index >= historyLookBack ? last_bar_index - historyLookBack : 0
+
+src = close
+y_train_series = src[4] < src[0] ? -1 : src[4] > src[0] ? 1 : 0
+var y_train_array = array.new_int(0)
+
+var predictions = array.new_float(0)
+var prediction = 0.
+var signal = 0
+var distances = array.new_float(0)
+
+array.push(y_train_array, y_train_series)
+
+lastDistance = -1.0
+size = math.min(historyLookBack-1, array.size(y_train_array)-1)
+sizeLoop = math.min(historyLookBack-1, size)
+
+get_ML_Distance(i) =>
+    switch
+        methodSelection == 'Lorentzian' => get_lorentzian_distance(i, featureSeries, featureArrays)
+        methodSelection == 'Euclidean' => get_euclidean_distance(i, featureSeries, featureArrays)
+        methodSelection == 'Cosine similarity' => get_cosine_similarity(i, featureSeries, featureArrays)
+
+if bar_index >= maxBarsBackIndex
+    for i = 0 to sizeLoop
+        d = get_ML_Distance(i)
+        if d >= lastDistance and i % 4
+            lastDistance := d
+            array.push(distances, d)
+            array.push(predictions, math.round(array.get(y_train_array, i)))
+            if array.size(predictions) > nearest_Probable_Distance
+                lastDistance := array.get(distances, math.round(nearest_Probable_Distance * 3 / 4))
+                array.shift(distances)
+                array.shift(predictions)
+    prediction := array.sum(predictions)
+
+getTrend() =>
+    switch
+        trenSelection == 'CPMA' => isRational ? isRationalSigma ? sigmoid(CPMA) : rationalQuadratic(CPMA, 8, 0.5, 25) : CPMA
+        trenSelection == 'FRMA' => isRational ? isRationalSigma ? sigmoid(FRMA) : rationalQuadratic(FRMA, 8, 0.5, 25) : FRMA
+        trenSelection == 'RationalQuad' => rqkValue
+
+trend = getTrend()
+
+bool isBullishSmooth = close >= trend
+bool isBearishSmooth = close <= trend
+
+[avgrationalQuad, plotColor] = CSM.getGradientColor(isFirstbar = barstate.isfirst, src = trend, length = trenSelection == 'CPMA' ? cpmaLength : trenSelection == 'FRMA' ? frmaLength : 14, isSmoothed = false)
+plot(avgrationalQuad, color=plotColor, linewidth=2, title="Trend")
+
+signal := prediction > 0 and (enableFilter ? isBullishSmooth : true) ? 1 : prediction < 0 and (enableFilter ? isBearishSmooth : true) ? -1 : nz(signal[1])
+isDifferentSignalType = ta.change(signal)
+isEarlySignalFlip = ta.change(signal) and (ta.change(signal[1]) or ta.change(signal[2]) or ta.change(signal[3]))
+isBuySignal = signal == 1
+isSellSignal = signal == -1
+isNewBuySignal = isBuySignal and isDifferentSignalType
+isNewSellSignal = isSellSignal and isDifferentSignalType
+
+get_PredictionColor(prediction) =>
+    arrColor = array.new_color(0)
+    array.push(arrColor, #FF0000)  // 0
+    array.push(arrColor, #FF1000)  // 1
+    array.push(arrColor, #FF2000)  // 2
+    array.push(arrColor, #FF3000)  // 3
+    array.push(arrColor, #FF4000)  // 4
+    array.push(arrColor, #FF5000)  // 5
+    array.push(arrColor, #FF6000)  // 6
+    array.push(arrColor, #FF7000)  // 7
+    array.push(arrColor, #FF8000)  // 8
+    array.push(arrColor, #FF9000)  // 9
+    array.push(arrColor, #0AAA00)  // 10
+    array.push(arrColor, #1BBB10)  // 11
+    array.push(arrColor, #2CCC20)  // 12
+    array.push(arrColor, #3DDD30)  // 13
+    array.push(arrColor, #5EEE50)  // 14
+    array.push(arrColor, #6FFF60)  // 15
+    array.push(arrColor, #7ABF70)  // 16
+    array.push(arrColor, #8BCF80)  // 17
+    array.push(arrColor, #9CDF90)  // 18
+    array.push(arrColor, #90DFF9)  // 19
+
+    distVal = prediction >= 10 or prediction <= -10 ? isNewSellSignal ? -10 : 9 : prediction
+    index = int(distVal + 10)
+    predictColor = array.get(arrColor, index)
+    [predictColor, index]
+
+[predictColor, index] = get_PredictionColor(prediction)
+plotshape(isNewBuySignal ? low : na, 'Buy', shape.labelup, location.belowbar, color=predictColor, size=size.small, offset=0)  // Plot a 'Buy' label shape with the predicted color
+plotshape(isNewSellSignal ? high : na, 'Sell', shape.labeldown, location.abovebar, color=predictColor, size=size.small, offset=0)  // Plot a 'Sell' label shape with the predicted color
+
+
+// MACD
+fast_length = input(title="Fast Length", defval=100, group="MACD")
+slow_length = input(title="Slow Length", defval=200, group="MACD")
+signal_length = input.int(title="Signal Smoothing",  minval = 1, maxval = 50, defval = 50, group="MACD")
+sma_source = input.string(title="Oscillator MA Type",  defval="EMA", options=["SMA", "EMA"], group="MACD")
+sma_signal = input.string(title="Signal Line MA Type", defval="EMA", options=["SMA", "EMA"], group="MACD")
+
+fast_ma = sma_source == "SMA" ? ta.sma(close, fast_length) : ta.ema(close, fast_length)
+slow_ma = sma_source == "SMA" ? ta.sma(close, slow_length) : ta.ema(close, slow_length)
+macd = fast_ma - slow_ma
+macd_signal = sma_signal == "SMA" ? ta.sma(macd, signal_length) : ta.ema(macd, signal_length)
+hist = macd - macd_signal
+
+macd_bull = hist >= 0
+macd_bear = hist < 0
+
+// Strategy
+long = isNewBuySignal and macd_bull
+short = isNewSellSignal and macd_bear
+
+longSl = ta.lowest(low, slLookBack)
+shortSl = ta.highest(high, slLookBack)
+var cnt = 1
+
+if long
+    inn = close
+    longTp = inn + tpCoef * (inn - longSl)    
+    if not reverse
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=longSl, limit=longTp)
+    else
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=longTp, limit=longSl)
+    cnt += 1
+
+if short
+    inn = close
+    shortTp = inn - tpCoef * (shortSl - inn)
+    if not reverse
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=shortSl, limit=shortTp)
+    else
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=shortTp, limit=shortSl)
+    cnt += 1
