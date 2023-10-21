@@ -1,0 +1,148 @@
+// A strategy using Nadaraya-Watson Envelope, RSI, and ATR Stop Loss Finder indicators
+// The strategy has been explained in this video: https://youtu.be/Olb47nBRSSo
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             USDJPY
+//      Timeframe:          15 MIN
+//      Range:              2023-08-15 — 2023-10-20
+//      Percent Profitable: 51.32%
+//      Total Trades:       76
+//      Profit Factor:      1.358
+
+//@version=5
+strategy("Nadaraya-Watson Envelope, RSI, and ATR Stop Loss Finder Strategy", "NDEATRRSI", default_qty_type=strategy.percent_of_equity, overlay=true, currency=currency.USD, max_lines_count=500, max_labels_count=500, max_bars_back=500)
+
+tpCoef = input.float(1.5, "TP Coef", group="Strategy")
+reverse = input.bool(false, "Reverse Signal", group="Strategy")
+
+// Nadaraya-Watson Envelope
+h = input.float(8.0,'Bandwidth', minval = 0, group = "NWE")
+mult = input.float(3.0, minval = 0, group = "NWE")
+repaint = input(false, 'Repainting Smoothing', tooltip = 'Repainting is an effect where the indicators historical output is subject to change over time. Disabling repainting will cause the indicator to output the endpoints of the calculations', group = "NWE")
+
+gauss(x, h) => math.exp(-(math.pow(x, 2)/(h * h * 2)))
+
+// Append lines
+n = bar_index
+var ln = array.new_line(0)
+if barstate.isfirst and repaint
+    for i = 0 to 499
+        array.push(ln,line.new(na,na,na,na))
+
+// End point method
+var coefs = array.new_float(0)
+var den = 0.
+
+if barstate.isfirst and not repaint
+    for i = 0 to 499
+        w = gauss(i, h)
+        coefs.push(w)
+    den := coefs.sum()
+
+out = 0.
+if not repaint
+    for i = 0 to 499
+        out += close[i] * coefs.get(i)
+out /= den
+mae = ta.sma(math.abs(close - out), 499) * mult
+
+upper = out + mae
+lower = out - mae
+
+plot(repaint ? na : upper, 'Upper', color = color.yellow)
+plot(repaint ? na : lower, 'Lower', color = color.yellow)
+
+// Compute and display NWE
+float y2 = na
+float y1 = na
+
+nwe = array.new<float>(0)
+if barstate.islast and repaint
+    sae = 0.
+
+    //Compute and set NWE point
+    for i = 0 to math.min(499,n - 1)
+        sum = 0.
+        sumw = 0.
+
+        //Compute weighted mean
+        for j = 0 to math.min(499,n - 1)
+            w = gauss(i - j, h)
+            sum += close[j] * w
+            sumw += w
+
+        y2 := sum / sumw
+        sae += math.abs(close[i] - y2)
+        nwe.push(y2)
+
+    sae := sae / math.min(499,n - 1) * mult
+    for i = 0 to math.min(499,n - 1)
+        if i % 2 != 0
+            line.new(n-i+1, y1 + sae, n-i, nwe.get(i) + sae, color = color.yellow)
+            line.new(n-i+1, y1 - sae, n-i, nwe.get(i) - sae, color = color.yellow)
+        y1 := nwe.get(i)
+
+
+// RSI
+rsiLength = input.int(5, "Length", minval=1, group = "RSI")
+up = ta.rma(math.max(ta.change(close), 0), rsiLength)
+down = ta.rma(-math.min(ta.change(close), 0), rsiLength)
+rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
+
+
+// Average True Range Stop Loss Finder
+length = input.int(title='Length', defval=14, minval=1, group = "ATR SL")
+smoothing = input.string(title='Smoothing', defval='SMA', options=['RMA', 'SMA', 'EMA', 'WMA'], group = "ATR SL")
+m = input(0.5, 'Multiplier', group = "ATR SL")
+
+ma_function(source, length) =>
+    if smoothing == 'RMA'
+        ta.rma(source, length)
+    else
+        if smoothing == 'SMA'
+            ta.sma(source, length)
+        else
+            if smoothing == 'EMA'
+                ta.ema(source, length)
+            else
+                ta.wma(source, length)
+
+shortSl = ma_function(ta.tr(true), length) * m + high
+longSl = low - ma_function(ta.tr(true), length) * m
+
+plot(shortSl, title='ATR Short Stop Loss', color=color.blue)
+plot(longSl, title='ATR Long Stop Loss', color=color.blue)
+
+
+// Strategy
+long = low[1] < lower and close > open and close < lower + 0.5 * (upper - lower) and rsi[1] < 30
+short = high[1] > upper and close < open and close > upper - 0.5 * (upper - lower) and rsi[1] > 70
+var cnt = 1
+
+if long
+    inn = close
+    longTp = inn + tpCoef * (inn - longSl)
+    if not reverse
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=longSl, limit=longTp)
+    else
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=longTp, limit=longSl)
+    cnt += 1
+
+if short
+    inn = close
+    shortTp = inn - tpCoef * (shortSl - inn)
+    if not reverse
+        id = "short " + str.tostring(cnt)
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort " + str.tostring(cnt), id, stop=shortSl, limit=shortTp)
+    else
+        id = "long " + str.tostring(cnt)
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong " + str.tostring(cnt), id, stop=shortTp, limit=shortSl)
+    cnt += 1
