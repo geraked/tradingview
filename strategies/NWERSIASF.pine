@@ -7,12 +7,12 @@
 //      Symbol:             USDJPY
 //      Timeframe:          15 MIN
 //      Range:              2023-08-15 — 2023-10-20
-//      Percent Profitable: 51.32%
-//      Total Trades:       76
-//      Profit Factor:      1.358
+//      Percent Profitable: 50.52%
+//      Total Trades:       97
+//      Profit Factor:      1.327
 
 //@version=5
-strategy("Nadaraya-Watson Envelope, RSI, and ATR Stop Loss Finder Strategy", "NDEATRRSI", default_qty_type=strategy.percent_of_equity, overlay=true, currency=currency.USD, max_lines_count=500, max_labels_count=500, max_bars_back=500)
+strategy("Nadaraya-Watson Envelope, RSI, and ATR Stop Loss Finder Strategy", "NWERSIASF", default_qty_type=strategy.percent_of_equity, overlay=true, currency=currency.USD, max_lines_count=500, max_labels_count=500, max_bars_back=500)
 
 tpCoef = input.float(1.5, "TP Coef", group="Strategy")
 reverse = input.bool(false, "Reverse Signal", group="Strategy")
@@ -93,9 +93,9 @@ rsi = down == 0 ? 100 : up == 0 ? 0 : 100 - (100 / (1 + up / down))
 
 
 // Average True Range Stop Loss Finder
-length = input.int(title='Length', defval=14, minval=1, group = "ATR SL")
-smoothing = input.string(title='Smoothing', defval='SMA', options=['RMA', 'SMA', 'EMA', 'WMA'], group = "ATR SL")
-m = input(0.5, 'Multiplier', group = "ATR SL")
+length = input.int(title='Length', defval=14, minval=1, group = "ASF")
+smoothing = input.string(title='Smoothing', defval='SMA', options=['RMA', 'SMA', 'EMA', 'WMA'], group = "ASF")
+m = input(0.5, 'Multiplier', group = "ASF")
 
 ma_function(source, length) =>
     if smoothing == 'RMA'
@@ -117,8 +117,8 @@ plot(longSl, title='ATR Long Stop Loss', color=color.blue)
 
 
 // Strategy
-long = low[1] < lower and close > open and close < lower + 0.5 * (upper - lower) and rsi[1] < 30
-short = high[1] > upper and close < open and close > upper - 0.5 * (upper - lower) and rsi[1] > 70
+long = low[1] < lower[1] and close > open and close < lower + 0.5 * (upper - lower) and rsi[1] < 30
+short = high[1] > upper[1] and close < open and close > upper - 0.5 * (upper - lower) and rsi[1] > 70
 var cnt = 1
 
 if long
