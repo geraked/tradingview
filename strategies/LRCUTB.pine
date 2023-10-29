@@ -1,0 +1,107 @@
+// A strategy using Linear Regression Candles and UT Bot Alerts
+// The strategy has been explained in this video: https://youtu.be/0ZzLlA9NFxo
+// It should be noted that the inversion of the strategy works better! :D
+// © 2023 Geraked, Rabist
+// Licensed under MIT
+
+// Backtesting result:
+//      Symbol:             USDCHF
+//      Timeframe:          15 MIN
+//      Range:              2023-08-01 — 2023-10-27
+//      Percent Profitable: 70.57%
+//      Total Trades:       435
+//      Profit Factor:      1.604
+
+//@version=5
+strategy("Linear Regression Candles and UT Bot Strategy", "LRCUTB", default_qty_type=strategy.percent_of_equity, overlay=true, currency=currency.USD)
+
+slLookback = input.int(7, "SL Lookback", group="Strategy")
+reverse = input.bool(true, "Reverse Signal", group="Strategy")
+
+// Humble LinReg Candles
+signal_length = input.int(title='Signal Smoothing', minval=1, maxval=200, defval=7, group="LinReg Candles")
+sma_signal = input(title='Simple MA (Signal Line)', defval=true, group="LinReg Candles")
+lin_reg = input(title='Lin Reg', defval=true, group="LinReg Candles")
+linreg_length = input.int(title='Linear Regression Length', minval=1, maxval=200, defval=11, group="LinReg Candles")
+
+bopen = lin_reg ? ta.linreg(open, linreg_length, 0) : open
+bhigh = lin_reg ? ta.linreg(high, linreg_length, 0) : high
+blow = lin_reg ? ta.linreg(low, linreg_length, 0) : low
+bclose = lin_reg ? ta.linreg(close, linreg_length, 0) : close
+
+r = bopen < bclose
+signal = sma_signal ? ta.sma(bclose, signal_length) : ta.ema(bclose, signal_length)
+
+plotcandle(r ? bopen : na, r ? bhigh : na, r ? blow : na, r ? bclose : na, title='LinReg Candles', color=color.green, wickcolor=color.green, bordercolor=color.green, editable=true)
+plotcandle(r ? na : bopen, r ? na : bhigh, r ? na : blow, r ? na : bclose, title='LinReg Candles', color=color.red, wickcolor=color.red, bordercolor=color.red, editable=true)
+plot(signal, color=color.new(color.white, 0))
+
+
+// UT Bot Alerts
+a = input(2, title='Key Vaule (changes the sensitivity)', group="UT Bot Alerts")
+c = input(1, title='ATR Period', group="UT Bot Alerts")
+
+xATR = ta.atr(c)
+nLoss = a * xATR
+
+xATRTrailingStop = 0.0
+iff_1 = close > nz(xATRTrailingStop[1], 0) ? close - nLoss : close + nLoss
+iff_2 = close < nz(xATRTrailingStop[1], 0) and close[1] < nz(xATRTrailingStop[1], 0) ? math.min(nz(xATRTrailingStop[1]), close + nLoss) : iff_1
+xATRTrailingStop := close > nz(xATRTrailingStop[1], 0) and close[1] > nz(xATRTrailingStop[1], 0) ? math.max(nz(xATRTrailingStop[1]), close - nLoss) : iff_2
+
+pos = 0
+iff_3 = close[1] > nz(xATRTrailingStop[1], 0) and close < nz(xATRTrailingStop[1], 0) ? -1 : nz(pos[1], 0)
+pos := close[1] < nz(xATRTrailingStop[1], 0) and close > nz(xATRTrailingStop[1], 0) ? 1 : iff_3
+
+ema = ta.ema(close, 1)
+above = ta.crossover(ema, xATRTrailingStop)
+below = ta.crossover(xATRTrailingStop, ema)
+
+buy = close > xATRTrailingStop and above
+sell = close < xATRTrailingStop and below
+
+plotshape(buy, title='Buy', text='Buy', style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(sell, title='Sell', text='Sell', style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+
+// Strategy
+long = buy and close > signal
+short = sell and close < signal
+
+longSl = ta.lowest(low, slLookback)
+shortSl = ta.highest(high, slLookback)
+
+longClose = bclose[1] > bopen[1] and bclose < bopen
+shortClose = bclose[1] < bopen[1] and bclose > bopen
+
+if longClose
+    if not reverse
+        strategy.close(id="long", comment="Close long")
+    else
+        strategy.close(id="short", comment="Close short")
+
+if shortClose
+    if not reverse
+        strategy.close(id="short", comment="Close short")
+    else
+        strategy.close(id="long", comment="Close long")
+
+if long
+    if not reverse
+        id = "long"
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong", id, stop=longSl)
+    else
+        id = "short"
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort", id, limit=longSl)
+
+if short
+    if not reverse
+        id = "short"
+        strategy.entry(id, strategy.short)
+        strategy.exit("exitShort", id, stop=shortSl)
+    else
+        id = "long"
+        strategy.entry(id, strategy.long)
+        strategy.exit("exitLong", id, limit=shortSl)
